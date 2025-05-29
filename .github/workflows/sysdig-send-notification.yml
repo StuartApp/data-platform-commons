@@ -12,21 +12,6 @@ on:
         required: false
         type: string
         default: 'Dockerfile'
-      python_version:
-        description: 'Python version to use (default: 3.9)'
-        required: false
-        type: string
-        default: '3.9'
-      install_postgresql_dev:
-        description: 'Whether to install PostgreSQL development libraries'
-        required: false
-        type: boolean
-        default: false
-      skip_python_install:
-        description: 'Skip Python dependency installation (useful when Dockerfile handles everything)'
-        required: false
-        type: boolean
-        default: false
     secrets:
       DOCKER_REGISTRY_USER:
         required: true
@@ -51,39 +36,6 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
-
-      - name: Set up Python
-        if: ${{ !inputs.skip_python_install }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ inputs.python_version }}
-
-      - name: Install PostgreSQL Development Libraries
-        if: ${{ inputs.install_postgresql_dev }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libpq-dev build-essential
-
-      - name: Cache pip dependencies
-        if: ${{ !inputs.skip_python_install }}
-        uses: actions/cache@v3
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
-
-      - name: Install dependencies
-        if: ${{ !inputs.skip_python_install }}
-        env:
-          PIP_INDEX_URL: ${{ env.PIP_INDEX_URL }}
-          PIP_TRUSTED_HOST: ${{ env.PIP_TRUSTED_HOST }}
-          PIP_EXTRA_INDEX_URL: ${{ env.PIP_EXTRA_INDEX_URL }}
-        run: |
-          python -m pip install --upgrade pip setuptools wheel
-          if [ -f requirements.txt ]; then
-            python -m pip install -r requirements.txt
-          fi
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
