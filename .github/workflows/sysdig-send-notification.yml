@@ -1,0 +1,221 @@
+name: 🛡️ Sysdig Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      docker_image_name:
+        description: 'Docker image name for scanning'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'Path to Dockerfile (default: Dockerfile)'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      python_version:
+        description: 'Python version to use (default: 3.9)'
+        required: false
+        type: string
+        default: '3.9'
+      install_postgresql_dev:
+        description: 'Whether to install PostgreSQL development libraries'
+        required: false
+        type: boolean
+        default: false
+      skip_python_install:
+        description: 'Skip Python dependency installation (useful when Dockerfile handles everything)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      DOCKER_REGISTRY_USER:
+        required: true
+      DOCKER_REGISTRY_PASSWORD:
+        required: true
+      SYSDIG_API_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL_SYSDIG:
+        required: true
+
+env:
+  IMAGE_TAG: sysdig
+  REGISTRY_URL: docker-registry.internal.stuart.com
+  PIP_INDEX_URL: http://nexus.internal.stuart.com:8081/repository/pypi-group/simple
+  PIP_TRUSTED_HOST: nexus.internal.stuart.com
+  PIP_EXTRA_INDEX_URL: https://pypi.org/simple
+
+jobs:
+  sysdig-scan:
+    runs-on: stuart-generic-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Set up Python
+        if: ${{ !inputs.skip_python_install }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ inputs.python_version }}
+
+      - name: Install PostgreSQL Development Libraries
+        if: ${{ inputs.install_postgresql_dev }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libpq-dev build-essential
+
+      - name: Cache pip dependencies
+        if: ${{ !inputs.skip_python_install }}
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        if: ${{ !inputs.skip_python_install }}
+        env:
+          PIP_INDEX_URL: ${{ env.PIP_INDEX_URL }}
+          PIP_TRUSTED_HOST: ${{ env.PIP_TRUSTED_HOST }}
+          PIP_EXTRA_INDEX_URL: ${{ env.PIP_EXTRA_INDEX_URL }}
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          fi
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+            mirrors = ["docker-registry-proxy.internal.stuart.com"]
+
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_URL }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY_URL }}/${{ inputs.docker_image_name }}:${{ env.IMAGE_TAG }} \
+            -f ${{ inputs.dockerfile_path }} \
+            --build-arg PIP_INDEX_URL=${{ env.PIP_INDEX_URL }} \
+            --build-arg PIP_TRUSTED_HOST=${{ env.PIP_TRUSTED_HOST }} \
+            --build-arg PIP_EXTRA_INDEX_URL=${{ env.PIP_EXTRA_INDEX_URL }} \
+            .
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.REGISTRY_URL }}/${{ inputs.docker_image_name }}:${{ env.IMAGE_TAG }}
+
+      - name: Sysdig Image Scan
+        id: sysdig-scan
+        uses: stuartapp/security-gh-actions/sysdig-scan@v1
+        continue-on-error: true
+        with:
+          image_name: ${{ inputs.docker_image_name }}
+          docker_registry: ${{ env.REGISTRY_URL }}
+          commit_sha: ${{ env.IMAGE_TAG }}
+          sysdig_api_token: ${{ secrets.SYSDIG_API_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          create_pr_comment: true
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysdig-scan-results
+          path: |
+            scan-results.json
+            scan-logs/
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Capture and parse Sysdig scan output
+        id: parse_sysdig_output
+        if: always()
+        run: |
+          echo "Sysdig scan outcome: ${{ steps.sysdig-scan.outcome }}"
+          
+          SCAN_RESULTS_JSON="scan-results.json"
+          CRITICAL_COUNT="0"
+    
+          if [ -f "$SCAN_RESULTS_JSON" ]; then
+            if jq . "$SCAN_RESULTS_JSON" > /dev/null 2>&1; then
+              # Method 1: Try to get policy failure count from policyEvaluations
+              POLICY_FAILURE_COUNT=$(jq -r '
+                .result.policyEvaluations[]? 
+                | select(.name | contains("Critical Vulnerabilities")) 
+                | .bundles[]?.rules[]? 
+                | select(.ruleType == "vulnSeverityAndThreats") 
+                | .failures 
+                | length
+              ' "$SCAN_RESULTS_JSON" 2>/dev/null)
+              
+              if [ -n "$POLICY_FAILURE_COUNT" ] && [ "$POLICY_FAILURE_COUNT" -gt 0 ]; then
+                CRITICAL_COUNT="$POLICY_FAILURE_COUNT"
+                echo "Found $CRITICAL_COUNT policy failures from JSON."
+              else
+                # Method 2: Get total critical vulnerabilities as fallback
+                TOTAL_CRITICAL=$(jq -r '.result.vulnTotalBySeverity.critical // 0' "$SCAN_RESULTS_JSON" 2>/dev/null)
+                if [ -n "$TOTAL_CRITICAL" ] && [ "$TOTAL_CRITICAL" -gt 0 ]; then
+                  CRITICAL_COUNT="$TOTAL_CRITICAL"
+                  echo "Found $CRITICAL_COUNT total critical vulnerabilities from JSON."
+                fi
+              fi
+            fi
+          fi
+    
+          # Fallback to log parsing if JSON didn't yield a critical count
+          if [ "$CRITICAL_COUNT" = "0" ]; then
+            for file in scan-logs/*.log scan-logs/*.txt *.log *.txt; do
+              if [ -f "$file" ]; then
+                POLICY_LINE=$(grep -E "Policy:.*Pipeline FAILED \([0-9]+ failures" "$file" 2>/dev/null || echo "")
+                if [ -n "$POLICY_LINE" ]; then
+                    POLICY_FAILURES=$(echo "$POLICY_LINE" | grep -oP 'Pipeline FAILED \(\K[0-9]+(?= failures)' || echo "")
+                    if [ -z "$POLICY_FAILURES" ]; then
+                      POLICY_FAILURES="0"
+                    fi
+                    if [ "$POLICY_FAILURES" != "0" ]; then
+                        CRITICAL_COUNT="$POLICY_FAILURES"
+                        echo "Found $CRITICAL_COUNT policy failures from log file."
+                        break
+                    fi
+                fi
+              fi
+            done
+          fi
+          
+          # If no specific count found but scan failed, we know there are vulnerabilities
+          if [ "$CRITICAL_COUNT" = "0" ] && [ "${{ steps.sysdig-scan.outcome }}" = "failure" ]; then
+            CRITICAL_COUNT="detected"
+          fi
+          
+          echo "Final critical vulnerabilities count: $CRITICAL_COUNT"
+          echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> $GITHUB_ENV
+          echo "critical_count_output=$CRITICAL_COUNT" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        if: always() && env.CRITICAL_COUNT != '0' && env.CRITICAL_COUNT != ''
+        run: |
+          REPO_NAME="${{ github.repository }}"
+          BRANCH_NAME="${{ github.ref_name }}"
+          COMMIT_SHA="${{ github.sha }}"
+          WORKFLOW_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          
+          if [ "${{ env.CRITICAL_COUNT }}" = "detected" ]; then
+            MESSAGE="🚨 *Sysdig Security Scan Alert* 🚨\n\n*Repository:* $REPO_NAME\n*Branch:* $BRANCH_NAME\n*Commit:* ${COMMIT_SHA:0:7}\n\n❌ *Critical vulnerabilities detected* in the Docker image.\n\nPlease check the workflow logs for detailed vulnerability information.\n\n🔗 [View workflow details]($WORKFLOW_URL)"
+          else
+            MESSAGE="🚨 *Sysdig Security Scan Alert* 🚨\n\n*Repository:* $REPO_NAME\n*Branch:* $BRANCH_NAME\n*Commit:* ${COMMIT_SHA:0:7}\n\n❌ *${{ env.CRITICAL_COUNT }} critical vulnerabilities* found in the Docker image.\n\n🔗 [View workflow details]($WORKFLOW_URL)"
+          fi
+          
+          curl -X POST -H 'Content-type: application/json' \
+            --data "{\"text\":\"$MESSAGE\"}" \
+            "${{ secrets.SLACK_WEBHOOK_URL_SYSDIG }}"
+          
+          echo "Slack notification sent for ${{ env.CRITICAL_COUNT }} critical vulnerabilities"
