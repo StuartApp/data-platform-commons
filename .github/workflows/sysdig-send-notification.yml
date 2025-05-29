@@ -12,6 +12,11 @@ on:
         required: false
         type: string
         default: 'Dockerfile'
+      build_context:
+        description: 'Docker build context directory (default: .)'
+        required: false
+        type: string
+        default: '.'
     secrets:
       DOCKER_REGISTRY_USER:
         required: true
@@ -59,7 +64,7 @@ jobs:
             --build-arg PIP_INDEX_URL=${{ env.PIP_INDEX_URL }} \
             --build-arg PIP_TRUSTED_HOST=${{ env.PIP_TRUSTED_HOST }} \
             --build-arg PIP_EXTRA_INDEX_URL=${{ env.PIP_EXTRA_INDEX_URL }} \
-            .
+            ${{ inputs.build_context }}
 
       - name: Push Docker image
         run: |
