@@ -1,4 +1,4 @@
-name: 🛡️ Sysdig Security Scan
+name: 🛡️ ExecuteSysdig Security Scan
 
 on:
   workflow_call:
