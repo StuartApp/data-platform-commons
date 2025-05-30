@@ -42,21 +42,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Debug - List files and directories
-        run: |
-          echo "Current directory:"
-          pwd
-          echo "Contents of current directory:"
-          ls -la
-          echo "Contents of ${{ inputs.build_context }} directory:"
-          ls -la ${{ inputs.build_context }}
-          echo "Looking for Dockerfile at: ${{ inputs.build_context }}/${{ inputs.dockerfile_path }}"
-          if [ -f "${{ inputs.build_context }}/${{ inputs.dockerfile_path }}" ]; then
-            echo "✅ Dockerfile found!"
-          else
-            echo "❌ Dockerfile NOT found!"
-          fi
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
         with:
