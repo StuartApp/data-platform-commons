@@ -26,17 +26,8 @@ if [ -f "$SCAN_RESULTS_JSON" ]; then
     HIGH_COUNT=$(jq -r '.result.vulnTotalBySeverity.high // 0' "$SCAN_RESULTS_JSON" 2>/dev/null)
     
     # Try to get fixable counts (if available in the JSON structure)
-    CRITICAL_FIXABLE=$(jq -r '
-      [.result.packages[]?.vulnerabilities[]? | 
-       select(.severity == "Critical" and .fix != null and .fix != "")] | 
-       length
-    ' "$SCAN_RESULTS_JSON" 2>/dev/null || echo "0")
-    
-    HIGH_FIXABLE=$(jq -r '
-      [.result.packages[]?.vulnerabilities[]? | 
-       select(.severity == "High" and .fix != null and .fix != "")] | 
-       length
-    ' "$SCAN_RESULTS_JSON" 2>/dev/null || echo "0")
+    CRITICAL_FIXABLE=$(jq -r '.result.fixableVulnTotalBySeverity.critical // 0' "$SCAN_RESULTS_JSON" 2>/dev/null)
+    HIGH_FIXABLE=$(jq -r '.result.fixableVulnTotalBySeverity.high // 0' "$SCAN_RESULTS_JSON" 2>/dev/null)
     
     echo "Found $CRITICAL_COUNT critical vulnerabilities ($CRITICAL_FIXABLE fixable)"
     echo "Found $HIGH_COUNT high vulnerabilities ($HIGH_FIXABLE fixable)"
