@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # Send Slack notification for Sysdig scan results
-# Usage: ./send-slack-notification.sh <webhook_url> <repo_name> <branch_name> <commit_sha> <workflow_url> <critical_count> <critical_fixable> <high_count> <high_fixable>
+# Usage: ./send-slack-notification.sh <webhook_url> <repo_name> <branch_name> <commit_sha> <workflow_url> <critical_count> <critical_fixable> <high_count> <high_fixable> <image_name> <scan_result_id>
 
 WEBHOOK_URL="$1"
 REPO_NAME="$2"
@@ -14,6 +14,8 @@ CRITICAL_COUNT="$6"
 CRITICAL_FIXABLE="$7"
 HIGH_COUNT="$8"
 HIGH_FIXABLE="$9"
+IMAGE_NAME="${10}"
+SCAN_RESULT_ID="${11}"
 
 # Check if Slack webhook URL is configured
 if [ -z "$WEBHOOK_URL" ]; then
@@ -48,7 +50,33 @@ else
   VULN_SUMMARY=$(IFS=', '; echo "${VULN_PARTS[*]}")
 fi
 
-MESSAGE="🚨 *Sysdig Security Scan Alert* 🚨\n\n*Repository:* $REPO_NAME\n*Branch:* $BRANCH_NAME\n*Commit:* ${COMMIT_SHA:0:7}\n\n❌ *$VULN_SUMMARY* found in the Docker image.\n\n🔗 [View workflow details]($WORKFLOW_URL)"
+# Build Sysdig URLs
+PIPELINE_URL=""
+RESULTS_URL=""
+
+if [ -n "$IMAGE_NAME" ]; then
+  # URL encode the image name for the pipeline filter
+  ENCODED_IMAGE=$(echo "$IMAGE_NAME" | sed 's/:/+%3A/g' | sed 's/\//+%2F/g')
+  PIPELINE_URL="https://eu1.app.sysdig.com/secure/#/vulnerabilities/overview/pipeline/?filter=context+%3D+%22pipeline%22+and+pullString+in+%28%22$ENCODED_IMAGE%22%29"
+fi
+
+if [ -n "$SCAN_RESULT_ID" ]; then
+  RESULTS_URL="https://eu1.app.sysdig.com/secure/#/vulnerabilities/results/$SCAN_RESULT_ID/overview"
+fi
+
+# Build Sysdig links section
+SYSDIG_LINKS=""
+if [ -n "$PIPELINE_URL" ] || [ -n "$RESULTS_URL" ]; then
+  SYSDIG_LINKS="\n\n🔍 *Sysdig Reports:*"
+  if [ -n "$PIPELINE_URL" ]; then
+    SYSDIG_LINKS="$SYSDIG_LINKS\n• [Pipeline Overview]($PIPELINE_URL)"
+  fi
+  if [ -n "$RESULTS_URL" ]; then
+    SYSDIG_LINKS="$SYSDIG_LINKS\n• [Detailed Results]($RESULTS_URL)"
+  fi
+fi
+
+MESSAGE="🚨 *Sysdig Security Scan Alert* 🚨\n\n*Repository:* $REPO_NAME\n*Branch:* $BRANCH_NAME\n*Commit:* ${COMMIT_SHA:0:7}\n\n❌ *$VULN_SUMMARY* found in the Docker image.$SYSDIG_LINKS\n\n🔗 [View workflow details]($WORKFLOW_URL)"
 
 echo "Sending Slack notification for: $VULN_SUMMARY"
 

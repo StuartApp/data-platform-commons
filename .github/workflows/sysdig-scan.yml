@@ -120,4 +120,6 @@ jobs:
             "${{ env.CRITICAL_COUNT }}" \
             "${{ env.CRITICAL_FIXABLE }}" \
             "${{ env.HIGH_COUNT }}" \
-            "${{ env.HIGH_FIXABLE }}"
+            "${{ env.HIGH_FIXABLE }}" \
+            "${{ env.REGISTRY_URL }}/${{ inputs.docker_image_name }}:${{ env.IMAGE_TAG }}" \
+            "${{ env.SCAN_RESULT_ID }}"

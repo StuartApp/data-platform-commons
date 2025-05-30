@@ -15,6 +15,7 @@ CRITICAL_FIXABLE="0"
 HIGH_COUNT="0"
 HIGH_FIXABLE="0"
 TOTAL_CRITICAL_HIGH="0"
+SCAN_RESULT_ID=""
 
 # Try to parse JSON results first
 if [ -f "$SCAN_RESULTS_JSON" ]; then
@@ -42,7 +43,7 @@ if [ "$CRITICAL_COUNT" = "0" ] && [ "$HIGH_COUNT" = "0" ]; then
     if [ -f "$file" ]; then
       echo "Checking file: $file"
       
-      # Look for patterns like "42 Critical (22 fixable)"
+
       CRITICAL_LINE=$(grep -oE "[0-9]+ Critical \([0-9]+ fixable\)" "$file" 2>/dev/null | head -1 || echo "")
       if [ -n "$CRITICAL_LINE" ]; then
         CRITICAL_COUNT=$(echo "$CRITICAL_LINE" | grep -oE "^[0-9]+" || echo "0")
@@ -64,6 +65,18 @@ if [ "$CRITICAL_COUNT" = "0" ] && [ "$HIGH_COUNT" = "0" ]; then
   done
 fi
 
+# Extract scan result ID from logs for detailed URL
+for file in scan-logs/*.log scan-logs/*.txt *.log *.txt; do
+  if [ -f "$file" ]; then
+    SCAN_ID_LINE=$(grep -o "scan-result-id=[a-f0-9]*" "$file" 2>/dev/null | head -1 || echo "")
+    if [ -n "$SCAN_ID_LINE" ]; then
+      SCAN_RESULT_ID=$(echo "$SCAN_ID_LINE" | cut -d'=' -f2)
+      echo "Found scan result ID: $SCAN_RESULT_ID"
+      break
+    fi
+  fi
+done
+
 # Calculate total critical + high for notification decision
 TOTAL_CRITICAL_HIGH=$((CRITICAL_COUNT + HIGH_COUNT))
 
@@ -80,4 +93,5 @@ echo "CRITICAL_COUNT=$CRITICAL_COUNT" >> "$GITHUB_ENV"
 echo "CRITICAL_FIXABLE=$CRITICAL_FIXABLE" >> "$GITHUB_ENV"
 echo "HIGH_COUNT=$HIGH_COUNT" >> "$GITHUB_ENV"
 echo "HIGH_FIXABLE=$HIGH_FIXABLE" >> "$GITHUB_ENV"
-echo "TOTAL_CRITICAL_HIGH=$TOTAL_CRITICAL_HIGH" >> "$GITHUB_ENV" 
+echo "TOTAL_CRITICAL_HIGH=$TOTAL_CRITICAL_HIGH" >> "$GITHUB_ENV"
+echo "SCAN_RESULT_ID=$SCAN_RESULT_ID" >> "$GITHUB_ENV" 
