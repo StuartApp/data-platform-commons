@@ -79,6 +79,11 @@ fi
 MESSAGE="🚨 *Sysdig Security Scan Alert* 🚨\n\n*Repository:* $REPO_NAME\n*Branch:* $BRANCH_NAME\n*Commit:* ${COMMIT_SHA:0:7}\n\n❌ *$VULN_SUMMARY* found in the Docker image.$SYSDIG_LINKS\n\n🔗 [View workflow details]($WORKFLOW_URL)"
 
 echo "Sending Slack notification for: $VULN_SUMMARY"
+echo ""
+echo "=== Full Slack Message Content ==="
+echo -e "$MESSAGE"
+echo "=================================="
+echo ""
 
 curl -X POST -H 'Content-type: application/json' \
   --data "{\"text\":\"$MESSAGE\"}" \
