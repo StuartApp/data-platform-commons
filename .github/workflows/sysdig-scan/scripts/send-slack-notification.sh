@@ -32,7 +32,7 @@ else
   
   if [ "$CRITICAL_COUNT" != "0" ]; then
     if [ "$CRITICAL_FIXABLE" != "0" ]; then
-      VULN_PARTS+=("$CRITICAL_COUNT Critical ($CRITICAL_FIXABLE fixable)")
+      VULN_PARTS+=("$CRITICAL_COUNT Critical ($CRITICAL_FIXABLE fixable) \n ")
     else
       VULN_PARTS+=("$CRITICAL_COUNT Critical")
     fi
@@ -56,7 +56,7 @@ RESULTS_URL=""
 
 if [ -n "$IMAGE_NAME" ]; then
   # URL encode the image name for the pipeline filter
-  ENCODED_IMAGE=$(echo "$IMAGE_NAME" | sed 's/:/+%3A/g' | sed 's/\//+%2F/g')
+  ENCODED_IMAGE=$(echo "$IMAGE_NAME" | sed 's/:/\%3A/g' | sed 's/\//\%2F/g')
   PIPELINE_URL="https://eu1.app.sysdig.com/secure/#/vulnerabilities/overview/pipeline/?filter=context+%3D+%22pipeline%22+and+pullString+in+%28%22$ENCODED_IMAGE%22%29"
 fi
 
@@ -69,10 +69,10 @@ SYSDIG_LINKS=""
 if [ -n "$PIPELINE_URL" ] || [ -n "$RESULTS_URL" ]; then
   SYSDIG_LINKS="\n\n🔍 *Sysdig Reports:*"
   if [ -n "$PIPELINE_URL" ]; then
-    SYSDIG_LINKS="$SYSDIG_LINKS\n• [Pipeline Overview]($PIPELINE_URL)"
+    SYSDIG_LINKS="$SYSDIG_LINKS\n• <$PIPELINE_URL|Pipeline Overview>"
   fi
   if [ -n "$RESULTS_URL" ]; then
-    SYSDIG_LINKS="$SYSDIG_LINKS\n• [Detailed Results]($RESULTS_URL)"
+    SYSDIG_LINKS="$SYSDIG_LINKS\n• <$RESULTS_URL|Detailed Results>"
   fi
 fi
 
