@@ -17,6 +17,11 @@ on:
         required: false
         type: string
         default: '.'
+      workflow_url:
+        description: 'URL of the calling workflow run'
+        required: false
+        type: string
+        default: ''
     secrets:
       DOCKER_REGISTRY_USER:
         required: true
@@ -116,7 +121,7 @@ jobs:
             "${{ github.repository }}" \
             "${{ github.ref_name }}" \
             "${{ github.sha }}" \
-            "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" \
+            "${{ inputs.workflow_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}" \
             "${{ env.CRITICAL_COUNT }}" \
             "${{ env.CRITICAL_FIXABLE }}" \
             "${{ env.HIGH_COUNT }}" \
