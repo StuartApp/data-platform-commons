@@ -1,0 +1,130 @@
+name: 🛡️ Execute Sysdig Security Scan
+
+on:
+  workflow_call:
+    inputs:
+      docker_image_name:
+        description: 'Docker image name for scanning'
+        required: true
+        type: string
+      dockerfile_path:
+        description: 'Path to Dockerfile (default: Dockerfile)'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      build_context:
+        description: 'Docker build context directory (default: .)'
+        required: false
+        type: string
+        default: '.'
+      workflow_url:
+        description: 'URL of the calling workflow run'
+        required: false
+        type: string
+        default: ''
+    secrets:
+      DOCKER_REGISTRY_USER:
+        required: true
+      DOCKER_REGISTRY_PASSWORD:
+        required: true
+      SYSDIG_API_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL_SYSDIG:
+        required: true
+
+env:
+  IMAGE_TAG: sysdig
+  REGISTRY_URL: docker-registry.internal.stuart.com
+  PIP_INDEX_URL: http://nexus.internal.stuart.com:8081/repository/pypi-group/simple
+  PIP_TRUSTED_HOST: nexus.internal.stuart.com
+  PIP_EXTRA_INDEX_URL: https://pypi.org/simple
+
+jobs:
+  sysdig-scan:
+    runs-on: stuart-generic-x64
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+
+      - name: Checkout data-platform-commons for scripts
+        uses: actions/checkout@v3
+        with:
+          repository: StuartApp/data-platform-commons
+          ref: DPLAT-738/sysdig-scan-workflow
+          path: commons-scripts
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          buildkitd-config-inline: |
+            [registry."docker.io"]
+            mirrors = ["docker-registry-proxy.internal.stuart.com"]
+
+      - name: Docker login
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY_URL }}
+          username: ${{ secrets.DOCKER_REGISTRY_USER }}
+          password: ${{ secrets.DOCKER_REGISTRY_PASSWORD }}
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            -t ${{ env.REGISTRY_URL }}/${{ inputs.docker_image_name }}:${{ env.IMAGE_TAG }} \
+            -f ${{ inputs.dockerfile_path }} \
+            --build-arg PIP_INDEX_URL=${{ env.PIP_INDEX_URL }} \
+            --build-arg PIP_TRUSTED_HOST=${{ env.PIP_TRUSTED_HOST }} \
+            --build-arg PIP_EXTRA_INDEX_URL=${{ env.PIP_EXTRA_INDEX_URL }} \
+            ${{ inputs.build_context }}
+
+      - name: Push Docker image
+        run: |
+          docker push ${{ env.REGISTRY_URL }}/${{ inputs.docker_image_name }}:${{ env.IMAGE_TAG }}
+
+      - name: Sysdig Image Scan
+        id: sysdig-scan
+        uses: stuartapp/security-gh-actions/sysdig-scan@v1
+        continue-on-error: true
+        with:
+          image_name: ${{ inputs.docker_image_name }}
+          docker_registry: ${{ env.REGISTRY_URL }}
+          commit_sha: ${{ env.IMAGE_TAG }}
+          sysdig_api_token: ${{ secrets.SYSDIG_API_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          create_pr_comment: true
+
+      - name: Upload scan results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sysdig-scan-results
+          path: |
+            scan-results.json
+            scan-logs/
+          retention-days: 30
+        continue-on-error: true
+
+      - name: Capture and parse Sysdig scan output
+        id: parse_sysdig_output
+        if: always()
+        run: |
+          chmod +x commons-scripts/.github/workflows/sysdig-scan/scripts/parse-sysdig-output.sh
+          commons-scripts/.github/workflows/sysdig-scan/scripts/parse-sysdig-output.sh "${{ steps.sysdig-scan.outcome }}"
+
+      - name: Send Slack notification
+        if: always() && env.TOTAL_CRITICAL_HIGH != '0' && env.TOTAL_CRITICAL_HIGH != ''
+        run: |
+          chmod +x commons-scripts/.github/workflows/sysdig-scan/scripts/send-slack-notification.sh
+          commons-scripts/.github/workflows/sysdig-scan/scripts/send-slack-notification.sh \
+            "${{ secrets.SLACK_WEBHOOK_URL_SYSDIG }}" \
+            "${{ github.repository }}" \
+            "${{ github.ref_name }}" \
+            "${{ github.sha }}" \
+            "${{ inputs.workflow_url || format('{0}/{1}/actions/runs/{2}', github.server_url, github.repository, github.run_id) }}" \
+            "${{ env.CRITICAL_COUNT }}" \
+            "${{ env.CRITICAL_FIXABLE }}" \
+            "${{ env.HIGH_COUNT }}" \
+            "${{ env.HIGH_FIXABLE }}" \
+            "${{ env.REGISTRY_URL }}/${{ inputs.docker_image_name }}:${{ env.IMAGE_TAG }}" \
+            "${{ env.SCAN_RESULT_ID }}"
