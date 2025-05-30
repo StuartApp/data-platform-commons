@@ -68,11 +68,14 @@ fi
 # Extract scan result ID from logs for detailed URL
 for file in scan-logs/*.log scan-logs/*.txt *.log *.txt; do
   if [ -f "$file" ]; then
-    SCAN_ID_LINE=$(grep -o "scan-result-id=[a-f0-9]*" "$file" 2>/dev/null | head -1 || echo "")
+    echo "Searching for scan-result-id in: $file"
+    SCAN_ID_LINE=$(grep -o "scan-result-id=[a-f0-9][a-f0-9]*" "$file" 2>/dev/null | head -1 || echo "")
     if [ -n "$SCAN_ID_LINE" ]; then
       SCAN_RESULT_ID=$(echo "$SCAN_ID_LINE" | cut -d'=' -f2)
       echo "Found scan result ID: $SCAN_RESULT_ID"
       break
+    else
+      echo "No scan-result-id found in $file"
     fi
   fi
 done

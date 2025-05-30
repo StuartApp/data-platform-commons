@@ -24,6 +24,12 @@ if [ -z "$WEBHOOK_URL" ]; then
   exit 0
 fi
 
+# Debug: Show received parameters
+echo "=== Debug: Received Parameters ==="
+echo "IMAGE_NAME: '$IMAGE_NAME'"
+echo "SCAN_RESULT_ID: '$SCAN_RESULT_ID'"
+echo "================================="
+
 # Build vulnerability summary
 if [ "$CRITICAL_COUNT" = "detected" ]; then
   VULN_SUMMARY="Critical vulnerabilities detected"
